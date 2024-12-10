@@ -10,6 +10,7 @@ import { nodejsQuizQuestions } from "./questions.ts";
 
 const app = express()
 app.use(cors())
+console.log(Deno.env.get("FRONTEND_URL"))
 const webSocketServer = http.createServer(app)
 const SOCKET_IO = new Server(webSocketServer, {
     cors: {
@@ -27,6 +28,7 @@ export type MatchmakingData =  {
 export interface Players {
     socketId: string
     category: string
+    userName: string
 }
 
 export class MatchmakingQueue {
@@ -42,25 +44,41 @@ const activeSocketConnections = new Set<string>()
 SOCKET_IO.on("connection", (socket) => {
     //Handle Incoming connection from individual client
     activeSocketConnections.add(socket.id)
-
+    console.dir(`Client is here ${socket.id}`)
     socket.emit("Thanks for connection")
+  
     socket.on("find-opponent", (data: MatchmakingData) => {
-        const opponentSocketId = findOpponent(data, GlobalMatchMakingQueue)
-        if(!opponentSocketId){
+        console.log(`Find Opponent data received ${data}`)
+        const { opponentsSocketId, opponentsName } = findOpponent(data, GlobalMatchMakingQueue);
+        if(!opponentsSocketId){
+            console.log(`No Players found yet`)
             GlobalMatchMakingQueue.items.push({
                 socketId: socket.id,
-                category: data.category
+                category: data.category,
+                userName: data.userName
             })
+            console.log(JSON.stringify(GlobalMatchMakingQueue))
         }
         else {
             console.log("Found Opponent")
             const matchData = {
                 player1: socket.id,
-                player2: opponentSocketId,
-                questions: nodejsQuizQuestions
-            };
-            socket.emit("start-match", matchData);
+                player2: opponentsSocketId,
+                questions: nodejsQuizQuestions,
+                player1Name: data.userName,
+                player2Name: opponentsName
+            }
             
+            const roomName = `match_${socket.id}_${opponentsSocketId}`;
+            socket.join(roomName);
+            SOCKET_IO.sockets.sockets.get(opponentsSocketId)?.join(roomName);
+            
+            SOCKET_IO.to(roomName).emit("start-match", matchData);
+            
+            GlobalMatchMakingQueue.items = GlobalMatchMakingQueue.items.filter(player => 
+                player.socketId !== socket.id && player.socketId !== opponentsSocketId
+            );
+            console.log(`Updated GlobalMatchMakingQueue: ${JSON.stringify(GlobalMatchMakingQueue)}`);
         }
     })
 
